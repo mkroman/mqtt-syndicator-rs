@@ -1,0 +1,24 @@
+[[feeds]]
+name = "Anandtech"
+category = "Blogs & News Feeds"
+url = "http://www.anandtech.com/rss/"
+
+[[feeds]]
+name = "DR Nyheder"
+category = "Blogs & News Feeds"
+url = "http://www.dr.dk/nyheder/service/feeds/allenyheder"
+
+[[feeds]]
+name = "Andrej Karpathy blog"
+category = "Machine Learning"
+url = "https://karpathy.github.io/feed.xml"
+
+[[feeds]]
+name = "CCC Event Weblog"
+category = "Events"
+url = "https://events.ccc.de/feed/"
+
+[[feeds]]
+name = "Project Zero"
+category = "Security Research"
+url = "http://googleprojectzero.blogspot.com/feeds/posts/default"

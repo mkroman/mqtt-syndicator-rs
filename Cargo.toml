@@ -1,0 +1,17 @@
+[package]
+authors = ["Mikkel Kroman <mk@uplink.io>"]
+name = "syndicator"
+version = "0.1.0"
+
+[dependencies]
+app_dirs = "1.1.1"
+clap = "2.19.2"
+env_logger = "0.3.5"
+hyper = "0.9.14"
+log = "0.3.6"
+quick-error = "1.1.0"
+rss = "0.4.0"
+rusqlite = "0.7.3"
+rustc-serialize = "0.3.22"
+time = "0.1.35"
+toml = "0.2.1"
