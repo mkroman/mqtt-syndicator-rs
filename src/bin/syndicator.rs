@@ -8,7 +8,6 @@ extern crate syndicator;
 use clap::{App, Arg};
 use app_dirs::{AppInfo, AppDataType, get_app_dir};
 
-use syndicator::error::{Error, ConfigError};
 use syndicator::Syndicator;
 
 const APP_INFO: AppInfo = AppInfo { name: "syndicator", author: "Mikkel Kroman <mk@maero.dk>" };
@@ -30,11 +29,7 @@ fn main() {
         .get_matches();
 
     let database_path = matches.value_of("database").unwrap();
-
-    let syndicator = match Syndicator::new("config.toml", database_path) {
-        Ok(syndicator) => syndicator,
-        Err(err) => panic!("Error when starting syndicator: {}", err),
-    };
+    let syndicator = Syndicator::new("config.toml", database_path).unwrap();
 
     syndicator.poll();
 }

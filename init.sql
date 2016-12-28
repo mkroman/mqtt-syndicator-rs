@@ -1,10 +1,9 @@
 CREATE TABLE IF NOT EXISTS `stories` (
   `id` INTEGER PRIMARY KEY,
-  `title` VARCHAR NOT NULL,
-  `guid` VARCHAR NOT NULL,
+  `title` VARCHAR,
+  `guid` VARCHAR,
   `pub_date` VARCHAR,
-  `content` TEXT,
-  `description` VARCHAR NOT NULL,
+  `description` VARCHAR,
   `feed_url` VARCHAR NOT NULL
 );
 

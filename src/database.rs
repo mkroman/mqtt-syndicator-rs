@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use ::time::{self, Timespec};
+use ::time;
 use ::rusqlite::{self, Connection};
 
 use super::Story;
@@ -31,38 +31,10 @@ impl Database {
 
         Ok(())
     }
+}
 
-    /// Finds the story with the given feed_url and guid.
-    pub fn find_story(&self, feed_url: &str, guid: &str) -> Option<Story> {
-        match self.connection.query_row(
-            "SELECT title, guid, content, pub_date, description, feed_url
-            FROM stories
-            WHERE (`guid` = ? AND `feed_url` = ?)
-            LIMIT 1",
-            &[&guid, &feed_url], |row| {
-                Story {
-                    title: row.get(0),
-                    guid: row.get(1),
-                    content: row.get(2),
-                    pub_date: row.get(3),
-                    description: row.get(4),
-                    feed_url: row.get(5)
-                }
-            }) {
-            Ok(result) => return Some(result),
-            Err(rusqlite::Error::QueryReturnedNoRows) => return None,
-            Err(_) => return None,
-        }
-    }
-
-    /// Inserts the story into the database.
-    pub fn insert_story(&self, story: Story) -> Result<(), Error> {
-        match self.connection.execute(
-            "INSERT INTO stories (title, guid, content, pub_date, description, feed_url)
-            VALUES (?, ?, ?, ?, ?, ?)",
-            &[&story.guid, &time::get_time(), &story.feed_url]) {
-            Ok(_) => return Ok(()),
-            Err(err) => return Err(err.into()),
-        }
+impl AsRef<rusqlite::Connection> for Database {
+    fn as_ref(&self) -> &rusqlite::Connection {
+        &self.connection
     }
 }

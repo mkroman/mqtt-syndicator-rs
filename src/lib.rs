@@ -45,9 +45,11 @@ use rustc_serialize::{Decodable};
 
 pub mod error;
 mod database;
+mod story;
 
-use error::{Error, ConfigError};
-use database::Database;
+pub use error::{Error, ConfigError};
+pub use story::Story;
+pub use database::Database;
 
 #[derive(Debug, RustcDecodable)]
 pub struct Feed {
@@ -56,6 +58,7 @@ pub struct Feed {
     pub category: String,
 }
 
+/// The main syndicator client.
 pub struct Syndicator {
     http_client: Client,
     config: Config,
@@ -64,16 +67,6 @@ pub struct Syndicator {
 
 pub struct Config {
     pub feeds: Vec<Feed>
-}
-
-#[derive(Debug)]
-pub struct Story {
-    pub title: String,
-    pub guid: String,
-    pub content: Option<String>,
-    pub pub_date: Option<String>,
-    pub description: String,
-    pub feed_url: String,
 }
 
 impl Config {
@@ -102,6 +95,7 @@ impl Config {
 }
 
 impl Syndicator {
+    /// Creates a new syndicator with a configuration file and database file.
     pub fn new<P: AsRef<Path>, P2: AsRef<Path>>(config_path: P, database_path: P2) -> Result<Syndicator, Error> {
         let mut file = File::open(config_path)?;
 
@@ -117,6 +111,9 @@ impl Syndicator {
         })
     }
 
+    /// Starts polling the feeds for news.
+    /// 
+    /// This function will block indefinitely.
     pub fn poll(&self) {
         loop {
             for feed in &self.config.feeds {
@@ -150,17 +147,18 @@ impl Syndicator {
 
     fn process_rss_channel(&self, feed_url: &str, channel: rss::Channel) -> Result<(), Error> {
         for item in channel.items {
-            let mut found = false;
-            let guid = &item.guid.as_ref().unwrap().value[..];
+            let guid = item.guid.map(|guid| guid.value);
 
-            if let Some(story) = self.database.find_story(&feed_url, &guid) {
-                debug!("Found story: {:?}", story);
+            if let Some(story) = Story::find_by_feed_url_and_guid(&self.database, &feed_url, &guid.as_ref().unwrap()) {
+                //debug!("Found story: {:?}", story);
 
+                // Skip to the next item.
                 continue;
             } else {
+                Story::create(&self.database, item.title, guid, item.pub_date, item.description,
+                              feed_url.to_string()).unwrap();
                 // Insert the story into the database.
                 println!("New news story found!");
-                println!("{:?}", &item);
             }
         }
 
