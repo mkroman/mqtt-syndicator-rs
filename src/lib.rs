@@ -39,15 +39,15 @@ use std::thread;
 use std::path::Path;
 use std::time::Duration;
 
-use time::Timespec;
 use hyper::Client;
 use toml::{Parser, Value};
 use rustc_serialize::{Decodable};
 
 pub mod error;
-use error::{Error, ConfigError};
+mod database;
 
-static INIT_SQL: &'static str = include_str!("../init.sql");
+use error::{Error, ConfigError};
+use database::Database;
 
 #[derive(Debug, RustcDecodable)]
 pub struct Feed {
@@ -59,11 +59,21 @@ pub struct Feed {
 pub struct Syndicator {
     http_client: Client,
     config: Config,
-    database: rusqlite::Connection,
+    database: Database,
 }
 
 pub struct Config {
     pub feeds: Vec<Feed>
+}
+
+#[derive(Debug)]
+pub struct Story {
+    pub title: String,
+    pub guid: String,
+    pub content: Option<String>,
+    pub pub_date: Option<String>,
+    pub description: String,
+    pub feed_url: String,
 }
 
 impl Config {
@@ -96,9 +106,9 @@ impl Syndicator {
         let mut file = File::open(config_path)?;
 
         let config = Config::read_from(&mut file)?;
-        let database = rusqlite::Connection::open(database_path)?;
+        let database = Database::open(database_path)?;
 
-        database.execute_batch(INIT_SQL).unwrap();
+        database.init().unwrap();
 
         Ok(Syndicator {
             http_client: Client::new(),
@@ -117,6 +127,7 @@ impl Syndicator {
                         continue;
                     }
                 };
+
                 let channel = match rss::Channel::read_from(BufReader::new(res)) {
                     Ok(channel) => channel,
                     Err(err) => {
@@ -142,26 +153,12 @@ impl Syndicator {
             let mut found = false;
             let guid = &item.guid.as_ref().unwrap().value[..];
 
-            match self.database.query_row("SELECT guid FROM `news` WHERE (`guid` = ? AND `feed_url` = ?) LIMIT 1", 
-                &[&guid, &feed_url], |_| found = true) {
-                Ok(_) => {},
-                Err(rusqlite::Error::QueryReturnedNoRows) => {},
-                Err(err) => {
-                    debug!("Error when looking for news with guid {:?}: {}", &guid, err);
-                    continue;
-                }
-            }
+            if let Some(story) = self.database.find_story(&feed_url, &guid) {
+                debug!("Found story: {:?}", story);
 
-            if !found {
-                match self.database.execute("INSERT INTO `news` (guid, created_at, feed_url) VALUES (?, ?, ?)",
-                    &[&guid, &time::get_time(), &feed_url]) {
-                    Ok(_) => {},
-                    Err(err) => {
-                        debug!("Error when looking for news with guid {:?}: {}", &guid, err);
-                        continue;
-                    }
-                }
-
+                continue;
+            } else {
+                // Insert the story into the database.
                 println!("New news story found!");
                 println!("{:?}", &item);
             }

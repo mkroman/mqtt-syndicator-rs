@@ -3,6 +3,10 @@ authors = ["Mikkel Kroman <mk@uplink.io>"]
 name = "syndicator"
 version = "0.1.0"
 
+[[bin]]
+name = "syndicator"
+doc = false
+
 [dependencies]
 app_dirs = "1.1.1"
 clap = "2.19.2"

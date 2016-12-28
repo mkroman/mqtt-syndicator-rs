@@ -34,6 +34,10 @@ quick_error! {
             from()
         }
 
+        Database(err: DatabaseError) {
+            from()
+        }
+
         Rusqlite(err: rusqlite::Error) {
             from()
         }
@@ -59,6 +63,16 @@ quick_error! {
 
         NoFeeds {
             description("no `feeds` key defined in config")
+        }
+    }
+}
+
+quick_error! {
+    #[derive(Debug)]
+    pub enum DatabaseError {
+        Rusqlite(error: rusqlite::Error) {
+            from()
+            description("database error")
         }
     }
 }
