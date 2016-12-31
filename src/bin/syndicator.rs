@@ -26,10 +26,18 @@ fn main() {
              .value_name("FILE")
              .help("Sets the database file")
              .default_value(default_database_path.to_str().unwrap()))
+        .arg(Arg::with_name("config")
+             .short("c")
+             .long("config")
+             .value_name("FILE")
+             .help("Sets the config file")
+             .default_value("config.toml"))
         .get_matches();
 
     let database_path = matches.value_of("database").unwrap();
-    let syndicator = Syndicator::new("config.toml", database_path).unwrap();
+    let config_path = matches.value_of("config").unwrap();
+
+    let syndicator = Syndicator::new(config_path, database_path).unwrap();
 
     syndicator.poll();
 }
