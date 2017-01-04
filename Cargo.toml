@@ -4,15 +4,17 @@ name = "syndicator"
 version = "0.1.0"
 
 [[bin]]
-name = "syndicator"
 doc = false
+name = "syndicator"
 
 [dependencies]
 app_dirs = "1.1.1"
 clap = "2.19.2"
 env_logger = "0.3.5"
 hyper = "0.9.14"
+lazy_static = "0.2.2"
 log = "0.3.6"
+mio = "0.6.2"
 quick-error = "1.1.0"
 rss = "0.4.0"
 rusqlite = "0.7.3"

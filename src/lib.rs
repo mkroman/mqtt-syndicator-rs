@@ -24,24 +24,28 @@
 
 #[macro_use]
 extern crate log;
+extern crate rss;
+extern crate mio;
 extern crate hyper;
 extern crate toml;
-extern crate rss;
 extern crate time;
 extern crate rusqlite;
+#[macro_use]
+extern crate lazy_static;
 #[macro_use]
 extern crate quick_error;
 extern crate rustc_serialize;
 
 use std::io::{Read, BufReader};
 use std::fs::File;
-use std::thread;
 use std::path::Path;
 use std::time::Duration;
 
 use hyper::Client;
 use toml::{Parser, Value};
 use rustc_serialize::{Decodable};
+use mio::{Poll, Events, PollOpt, Ready, Token};
+use mio::timer::Timer;
 
 pub mod error;
 mod database;
@@ -59,10 +63,11 @@ pub struct Feed {
 }
 
 /// The main syndicator client.
-pub struct Syndicator {
+pub struct Server {
     http_client: Client,
     config: Config,
     database: Database,
+    poll: Poll,
 }
 
 pub struct Config {
@@ -94,9 +99,15 @@ impl Config {
     }
 }
 
-impl Syndicator {
+const TIMER: Token = Token(0);
+
+lazy_static! {
+    static ref POLL_DURATION: Duration = Duration::from_secs(60);
+}
+
+impl Server {
     /// Creates a new syndicator with a configuration file and database file.
-    pub fn new<P: AsRef<Path>, P2: AsRef<Path>>(config_path: P, database_path: P2) -> Result<Syndicator, Error> {
+    pub fn new<P: AsRef<Path>, P2: AsRef<Path>>(config_path: P, database_path: P2) -> Result<Server, Error> {
         let mut file = File::open(config_path)?;
 
         let config = Config::read_from(&mut file)?;
@@ -104,44 +115,69 @@ impl Syndicator {
 
         database.init().unwrap();
 
-        Ok(Syndicator {
+        Ok(Server {
             http_client: Client::new(),
             database: database,
             config: config,
+            poll: Poll::new()?
         })
+    }
+
+    fn refresh_feeds(&self) {
+        trace!("Refreshing feeds");
+
+        for feed in &self.config.feeds {
+            let res = match self.http_client.get(&feed.url).send() {
+                Ok(res) => res,
+                Err(err) => {
+                    debug!("Error when requesting feed: {:?}", err);
+                    continue;
+                }
+            };
+
+            let channel = match rss::Channel::read_from(BufReader::new(res)) {
+                Ok(channel) => channel,
+                Err(err) => {
+                    debug!("Error processing rss feed: {:?}", err);
+                    continue;
+                }
+            };
+
+            match self.process_rss_channel(&feed.url, channel) {
+                Ok(_) => {},
+                Err(err) => {
+                    info!("Error when processing rss channel: {}, {:?}", err, err);
+                }
+            }
+        }
     }
 
     /// Starts polling the feeds for news.
     /// 
     /// This function will block indefinitely.
     pub fn poll(&self) {
+        let mut events = Events::with_capacity(1024);
+        let mut timer = Timer::default();
+
+        trace!("Starting polling");
+
+        timer.set_timeout(*POLL_DURATION, "syndicate").unwrap();
+
+        self.poll.register(&timer, TIMER, Ready::readable(), PollOpt::edge()).unwrap();
+
         loop {
-            for feed in &self.config.feeds {
-                let res = match self.http_client.get(&feed.url).send() {
-                    Ok(res) => res,
-                    Err(err) => { 
-                        debug!("Error when requesting feed: {:?}", err);
-                        continue;
-                    }
-                };
+            self.poll.poll(&mut events, None).unwrap();
 
-                let channel = match rss::Channel::read_from(BufReader::new(res)) {
-                    Ok(channel) => channel,
-                    Err(err) => {
-                        debug!("Error processing rss feed: {:?}", err);
-                        continue;
-                    }
-                };
+            for event in events.iter() {
+                match event.token() {
+                    TIMER => {
 
-                match self.process_rss_channel(&feed.url, channel) {
-                    Ok(_) => {},
-                    Err(err) => {
-                        info!("Error when processing rss channel: {}, {:?}", err, err);
-                    }
+                        self.refresh_feeds();
+                        timer.set_timeout(*POLL_DURATION, "syndicate").unwrap();
+                    },
+                    _ => {}
                 }
             }
-
-            thread::sleep(Duration::from_secs(60));
         }
     }
 
@@ -149,7 +185,8 @@ impl Syndicator {
         for item in channel.items {
             let guid = item.guid.map(|guid| guid.value);
 
-            if let Some(story) = Story::find_by_feed_url_and_guid(&self.database, &feed_url, &guid.as_ref().unwrap()) {
+            if let Some(story) = Story::find_by_feed_url_and_guid(&self.database, &feed_url,
+                                                                  &guid.as_ref().unwrap()) {
                 //debug!("Found story: {:?}", story);
 
                 // Skip to the next item.

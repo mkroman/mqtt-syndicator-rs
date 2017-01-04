@@ -23,7 +23,6 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use ::rusqlite;
-use ::time;
 
 use super::error;
 
@@ -75,9 +74,9 @@ impl Story {
 
         match connection.query_row(
             "SELECT title, guid, pub_date, description, feed_url
-            FROM stories
-            WHERE (`feed_url` = ? AND `guid` = ?)
-            LIMIT 1",
+             FROM stories
+             WHERE (feed_url = ? AND guid = ?)
+             LIMIT 1",
             &[&feed_url.as_ref(), &guid.as_ref()], |row| {
                 Story {
                     title: row.get(0),

@@ -1,9 +1,7 @@
 use std::path::Path;
 
-use ::time;
 use ::rusqlite::{self, Connection};
 
-use super::Story;
 use super::error::DatabaseError;
 
 pub type Error = DatabaseError;
