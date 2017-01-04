@@ -22,12 +22,9 @@
 // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::io;
+use std::io::{self, Read};
 
-use rusqlite;
-
-pub use super::config::Error as ConfigError;
-pub use super::database::Error as DatabaseError;
+use toml::{Decoder, Parser, Value, ParserError};
 
 quick_error! {
     #[derive(Debug)]
@@ -36,19 +33,50 @@ quick_error! {
             from()
         }
 
-        Database(err: DatabaseError) {
-            from()
+        TomlParser(errors: Vec<ParserError>) {
+            description("config parse error")
         }
 
-        Rusqlite(err: rusqlite::Error) {
-            from()
+        NoFeeds {
+            description("no `feeds` key defined in config")
         }
-
-        Config(err: ConfigError) {
-            from()
-            description("config error")
-        }
-
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Feed {
+    pub name: String,
+    pub url: String,
+    pub category: String,
+}
+
+pub struct Config {
+    pub feeds: Vec<Feed>
+}
+
+impl Config {
+    pub fn read_from<R: Read>(reader: &mut R) -> Result<Config, Error> {
+        let mut s = String::new();
+        reader.read_to_string(&mut s)?;
+
+        let mut parser = Parser::new(&s);
+        let table = match parser.parse() {
+            Some(config) => Value::Table(config),
+            None => return Err(Error::TomlParser(parser.errors)),
+        };
+
+        let subscriptions = table.lookup("feeds").ok_or(Error::NoFeeds)?;
+        let mut feeds: Vec<Feed> = Vec::new();
+
+        for entry in subscriptions.as_slice().unwrap() {
+            use serde::Deserialize;
+            let mut decoder = Decoder::new(entry.clone());
+            let feed: Feed = Deserialize::deserialize(&mut decoder).unwrap();
+            feeds.push(feed);
+        }
+
+        Ok(Config {
+            feeds: feeds
+        })
+    }
+}

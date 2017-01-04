@@ -2,11 +2,17 @@ use std::path::Path;
 
 use ::rusqlite::{self, Connection};
 
-use super::error::DatabaseError;
-
-pub type Error = DatabaseError;
-
 static INIT_SQL: &'static str = include_str!("../init.sql");
+
+quick_error! {
+    #[derive(Debug)]
+    pub enum Error {
+        Rusqlite(error: rusqlite::Error) {
+            from()
+            description("database error")
+        }
+    }
+}
 
 /// Database struct.
 pub struct Database {

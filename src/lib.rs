@@ -39,30 +39,24 @@ extern crate quick_error;
 #[macro_use]
 extern crate serde_derive;
 
-use std::io::{Read, BufReader};
+use std::io::BufReader;
 use std::fs::File;
 use std::path::Path;
 use std::time::Duration;
 
 use hyper::Client;
-use toml::{Parser, Value};
 use mio::{Poll, Events, PollOpt, Ready, Token};
 use mio::timer::Timer;
 
 pub mod error;
-mod database;
+pub mod config;
 mod story;
+pub mod database;
 
-pub use error::{Error, ConfigError};
+pub use error::Error;
+pub use config::{Config, Feed};
 pub use story::Story;
 pub use database::Database;
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Feed {
-    pub name: String,
-    pub url: String,
-    pub category: String,
-}
 
 /// The main syndicator client.
 pub struct Server {
@@ -70,37 +64,6 @@ pub struct Server {
     config: Config,
     database: Database,
     poll: Poll,
-}
-
-pub struct Config {
-    pub feeds: Vec<Feed>
-}
-
-impl Config {
-    pub fn read_from<R: Read>(reader: &mut R) -> Result<Config, ConfigError> {
-        let mut s = String::new();
-        reader.read_to_string(&mut s)?;
-
-        let mut parser = Parser::new(&s);
-        let table = match parser.parse() {
-            Some(config) => Value::Table(config),
-            None => return Err(ConfigError::TomlParser(parser.errors)),
-        };
-
-        let subscriptions = table.lookup("feeds").ok_or(ConfigError::NoFeeds)?;
-        let mut feeds: Vec<Feed> = Vec::new();
-
-        for entry in subscriptions.as_slice().unwrap() {
-            use serde::Deserialize;
-            let mut decoder = toml::Decoder::new(entry.clone());
-            let feed: Feed = Deserialize::deserialize(&mut decoder).unwrap();
-            feeds.push(feed);
-        }
-
-        Ok(Config {
-            feeds: feeds
-        })
-    }
 }
 
 const TIMER: Token = Token(0);
