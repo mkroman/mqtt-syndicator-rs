@@ -21,20 +21,23 @@
 // CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#![feature(proc_macro)]
 
 #[macro_use]
 extern crate log;
 extern crate rss;
 extern crate mio;
-extern crate hyper;
 extern crate toml;
+extern crate serde;
 extern crate time;
+extern crate hyper;
 extern crate rusqlite;
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
 extern crate quick_error;
-extern crate rustc_serialize;
+#[macro_use]
+extern crate serde_derive;
 
 use std::io::{Read, BufReader};
 use std::fs::File;
@@ -43,7 +46,6 @@ use std::time::Duration;
 
 use hyper::Client;
 use toml::{Parser, Value};
-use rustc_serialize::{Decodable};
 use mio::{Poll, Events, PollOpt, Ready, Token};
 use mio::timer::Timer;
 
@@ -55,7 +57,7 @@ pub use error::{Error, ConfigError};
 pub use story::Story;
 pub use database::Database;
 
-#[derive(Debug, RustcDecodable)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Feed {
     pub name: String,
     pub url: String,
@@ -89,7 +91,9 @@ impl Config {
         let mut feeds: Vec<Feed> = Vec::new();
 
         for entry in subscriptions.as_slice().unwrap() {
-            let feed: Feed = Decodable::decode(&mut toml::Decoder::new(entry.clone())).unwrap();
+            use serde::Deserialize;
+            let mut decoder = toml::Decoder::new(entry.clone());
+            let feed: Feed = Deserialize::deserialize(&mut decoder).unwrap();
             feeds.push(feed);
         }
 
@@ -161,6 +165,9 @@ impl Server {
 
         trace!("Starting polling");
 
+        // Refresh feeds on startup.
+        self.refresh_feeds();
+
         timer.set_timeout(*POLL_DURATION, "syndicate").unwrap();
 
         self.poll.register(&timer, TIMER, Ready::readable(), PollOpt::edge()).unwrap();
@@ -171,7 +178,6 @@ impl Server {
             for event in events.iter() {
                 match event.token() {
                     TIMER => {
-
                         self.refresh_feeds();
                         timer.set_timeout(*POLL_DURATION, "syndicate").unwrap();
                     },
