@@ -42,7 +42,8 @@ extern crate serde_derive;
 use std::io::BufReader;
 use std::fs::File;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Instant, Duration};
+use std::sync::{Arc, Mutex};
 
 use hyper::Client;
 use mio::{Poll, Events, PollOpt, Ready, Token};
@@ -61,7 +62,7 @@ pub use database::Database;
 /// The main syndicator client.
 pub struct Server {
     http_client: Client,
-    config: Config,
+    config: Arc<Mutex<Config>>,
     database: Database,
     poll: Poll,
 }
@@ -69,12 +70,13 @@ pub struct Server {
 const TIMER: Token = Token(0);
 
 lazy_static! {
-    static ref POLL_DURATION: Duration = Duration::from_secs(60);
+    static ref POLL_DURATION: Duration = Duration::from_secs(1);
 }
 
 impl Server {
     /// Creates a new syndicator with a configuration file and database file.
-    pub fn new<P: AsRef<Path>, P2: AsRef<Path>>(config_path: P, database_path: P2) -> Result<Server, Error> {
+    pub fn new<P: AsRef<Path>, P2: AsRef<Path>>(config_path: P, database_path: P2)
+        -> Result<Server, Error> {
         let mut file = File::open(config_path)?;
 
         let config = Config::read_from(&mut file)?;
@@ -85,15 +87,27 @@ impl Server {
         Ok(Server {
             http_client: Client::new(),
             database: database,
-            config: config,
+            config: Arc::new(Mutex::new(config)),
             poll: Poll::new()?
         })
     }
 
-    fn refresh_feeds(&self) {
+    /// Refreshes any pending feeds.
+    fn refresh_feeds(&mut self) {
         trace!("Refreshing feeds");
 
-        for feed in &self.config.feeds {
+        let now = Instant::now();
+        let config_ref = self.config.clone();
+        let mut config = config_ref.lock().unwrap();
+        let mut feeds: Vec<&mut Feed> = config.feeds.iter_mut()
+            .filter(|feed| feed.updated_at.is_none() ||
+                    now - feed.updated_at.unwrap() < *POLL_DURATION).collect();
+
+        debug!("{} feeds need updating", feeds.len());
+
+        for mut feed in feeds.iter_mut() {
+            trace!("Refreshing feed {:?}", feed);
+
             let res = match self.http_client.get(&feed.url).send() {
                 Ok(res) => res,
                 Err(err) => {
@@ -101,6 +115,8 @@ impl Server {
                     continue;
                 }
             };
+
+            feed.updated_at = Some(Instant::now());
 
             let channel = match rss::Channel::read_from(BufReader::new(res)) {
                 Ok(channel) => channel,
@@ -122,7 +138,7 @@ impl Server {
     /// Starts polling the feeds for news.
     /// 
     /// This function will block indefinitely.
-    pub fn poll(&self) {
+    pub fn poll(&mut self) {
         let mut events = Events::with_capacity(1024);
         let mut timer = Timer::default();
 
@@ -150,7 +166,8 @@ impl Server {
         }
     }
 
-    fn process_rss_channel(&self, feed_url: &str, channel: rss::Channel) -> Result<(), Error> {
+    fn process_rss_channel(&mut self, feed_url: &str, channel: rss::Channel)
+        -> Result<(), Error> {
         for item in channel.items {
             let guid = item.guid.map(|guid| guid.value);
 

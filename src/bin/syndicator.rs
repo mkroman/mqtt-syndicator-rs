@@ -35,7 +35,7 @@ fn main() {
     let database_path = matches.value_of("database").unwrap();
     let config_path = matches.value_of("config").unwrap();
 
-    let syndicator = syndicator::Server::new(config_path, database_path).unwrap();
+    let mut syndicator = syndicator::Server::new(config_path, database_path).unwrap();
 
     syndicator.poll();
 }

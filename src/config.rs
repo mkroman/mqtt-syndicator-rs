@@ -23,6 +23,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::io::{self, Read};
+use std::time::Instant;
 
 use toml::{Decoder, Parser, Value, ParserError};
 
@@ -43,18 +44,34 @@ quick_error! {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Feed {
-    pub name: String,
-    pub url: String,
-    pub category: String,
+// The default interval between updates for feeds if undefined.
+fn default_interval() -> u16 {
+    60
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Feed {
+    /// The name of the feed.
+    pub name: String,
+    /// The URL of the feed.
+    pub url: String,
+    /// The category.
+    pub category: String,
+    /// The refresh interval.
+    #[serde(default = "default_interval")]
+    pub interval: u16,
+    /// The last time the feed was updated.
+    #[serde(skip_deserializing, skip_serializing)]
+    pub updated_at: Option<Instant>,
+}
+
+/// Parsed configuration.
 pub struct Config {
     pub feeds: Vec<Feed>
 }
 
 impl Config {
+    /// Reads the input TOML from `reader` and tries to parse it.
     pub fn read_from<R: Read>(reader: &mut R) -> Result<Config, Error> {
         let mut s = String::new();
         reader.read_to_string(&mut s)?;
