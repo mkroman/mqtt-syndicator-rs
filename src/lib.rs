@@ -38,14 +38,16 @@ extern crate lazy_static;
 extern crate quick_error;
 #[macro_use]
 extern crate serde_derive;
+extern crate atom_syndication;
 
-use std::io::BufReader;
+use std::io::{Cursor, BufReader, Read};
 use std::fs::File;
 use std::path::Path;
 use std::time::{Instant, Duration};
 use std::sync::{Arc, Mutex};
 
 use hyper::Client;
+use hyper::header::{AcceptCharset, Charset, qitem};
 use mio::{Poll, Events, PollOpt, Ready, Token};
 use mio::timer::Timer;
 
@@ -97,18 +99,20 @@ impl Server {
         trace!("Refreshing feeds");
 
         let now = Instant::now();
-        let config_ref = self.config.clone();
-        let mut config = config_ref.lock().unwrap();
+        let config = self.config.clone();
+        let mut config = config.lock().unwrap();
         let mut feeds: Vec<&mut Feed> = config.feeds.iter_mut()
             .filter(|feed| feed.updated_at.is_none() ||
-                    now - feed.updated_at.unwrap() < *POLL_DURATION).collect();
+                    now - feed.updated_at.unwrap() > Duration::from_secs(feed.interval as u64))
+            .collect();
 
         debug!("{} feeds need updating", feeds.len());
 
         for mut feed in feeds.iter_mut() {
             trace!("Refreshing feed {:?}", feed);
 
-            let res = match self.http_client.get(&feed.url).send() {
+            let mut res = match self.http_client.get(&feed.url)
+                .header(AcceptCharset(vec![qitem(Charset::Ext("utf-8".to_owned()))])).send() {
                 Ok(res) => res,
                 Err(err) => {
                     debug!("Error when requesting feed: {:?}", err);
@@ -118,20 +122,45 @@ impl Server {
 
             feed.updated_at = Some(Instant::now());
 
-            let channel = match rss::Channel::read_from(BufReader::new(res)) {
-                Ok(channel) => channel,
-                Err(err) => {
-                    debug!("Error processing rss feed: {:?}", err);
-                    continue;
+            let buf: String = {
+                let mut data: Vec<u8> = Vec::new();
+
+                match res.read_to_end(&mut data) {
+                    Ok(_) => String::from_utf8_lossy(&data).into_owned(),
+                    Err(err) => {
+                        error!("Error reading http body: {:?}", err);
+                        continue;
+                    }
                 }
             };
 
-            match self.process_rss_channel(&feed.url, channel) {
-                Ok(_) => {},
+            match buf.as_str().parse::<atom_syndication::Feed>() {
+                Ok(atom_feed) => {
+                    match self.process_atom_feed(&feed.url, atom_feed) {
+                        Ok(_) => {},
+                        Err(err) => {
+                            info!("Error when processing atom feed: {}, {:?}", err, err);
+                        }
+                    }
+                },
                 Err(err) => {
-                    info!("Error when processing rss channel: {}, {:?}", err, err);
+                    match rss::Channel::read_from(BufReader::new(Cursor::new(buf))) {
+                        Ok(channel) => {
+                            match self.process_rss_channel(&feed.url, channel) {
+                                Ok(_) => {},
+                                Err(err) => {
+                                    info!("Error when processing rss channel: {}, {:?}", err, err);
+                                }
+                            }
+                        },
+                        Err(err) => {
+                            debug!("Error processing rss feed: {:?}", err);
+                            continue;
+                        }
+                    }
                 }
             }
+
         }
     }
 
@@ -166,8 +195,16 @@ impl Server {
         }
     }
 
+    fn process_atom_feed(&mut self, feed_url: &str, feed: atom_syndication::Feed) -> Result<(), Error> {
+        trace!("Processing atom feed for {}", feed_url);
+
+        Ok(())
+    }
+
     fn process_rss_channel(&mut self, feed_url: &str, channel: rss::Channel)
         -> Result<(), Error> {
+        trace!("Processing RSS channel for feed {}", feed_url);
+
         for item in channel.items {
             let guid = item.guid.map(|guid| guid.value);
 
