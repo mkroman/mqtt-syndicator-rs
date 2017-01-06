@@ -69,6 +69,11 @@ pub struct Server {
     poll: Poll,
 }
 
+enum FeedType {
+    Rss(rss::Channel),
+    Atom(atom_syndication::Feed),
+}
+
 const TIMER: Token = Token(0);
 
 lazy_static! {
@@ -92,6 +97,37 @@ impl Server {
             config: Arc::new(Mutex::new(config)),
             poll: Poll::new()?
         })
+    }
+
+    fn parse_feed<R: Read>(reader: &mut R) -> Option<FeedType> {
+        let buf: String = {
+            let mut data: Vec<u8> = Vec::new();
+
+            match reader.read_to_end(&mut data) {
+                Ok(_) => String::from_utf8_lossy(&data).into_owned(),
+                Err(err) => {
+                    error!("Error reading feed data: {:?}", err);
+                    return None;
+                }
+            }
+        };
+
+        match buf.as_str().parse::<atom_syndication::Feed>() {
+            Ok(atom_feed) => {
+                return Some(FeedType::Atom(atom_feed));
+            },
+            Err(err) => {
+                match rss::Channel::read_from(BufReader::new(Cursor::new(buf))) {
+                    Ok(channel) => {
+                        return Some(FeedType::Rss(channel));
+                    },
+                    Err(err) => {
+                        debug!("Error processing rss feed: {:?}", err);
+                        return None;
+                    }
+                }
+            }
+        }
     }
 
     /// Refreshes any pending feeds.
@@ -122,42 +158,24 @@ impl Server {
 
             feed.updated_at = Some(Instant::now());
 
-            let buf: String = {
-                let mut data: Vec<u8> = Vec::new();
-
-                match res.read_to_end(&mut data) {
-                    Ok(_) => String::from_utf8_lossy(&data).into_owned(),
-                    Err(err) => {
-                        error!("Error reading http body: {:?}", err);
-                        continue;
-                    }
-                }
-            };
-
-            match buf.as_str().parse::<atom_syndication::Feed>() {
-                Ok(atom_feed) => {
-                    match self.process_atom_feed(&feed.url, atom_feed) {
+            match Server::parse_feed(&mut res) {
+                Some(FeedType::Rss(channel)) => {
+                    match self.process_rss_channel(&feed, channel) {
                         Ok(_) => {},
                         Err(err) => {
-                            info!("Error when processing atom feed: {}, {:?}", err, err);
+                            info!("Error when processing rss channel: {}, {:?}", err, err);
                         }
                     }
                 },
-                Err(err) => {
-                    match rss::Channel::read_from(BufReader::new(Cursor::new(buf))) {
-                        Ok(channel) => {
-                            match self.process_rss_channel(&feed.url, channel) {
-                                Ok(_) => {},
-                                Err(err) => {
-                                    info!("Error when processing rss channel: {}, {:?}", err, err);
-                                }
-                            }
-                        },
+                Some(FeedType::Atom(atom_feed)) => {
+                    match self.process_atom_feed(&feed, atom_feed) {
+                        Ok(_) => {},
                         Err(err) => {
-                            debug!("Error processing rss feed: {:?}", err);
-                            continue;
+                            info!("Error when processing rss channel: {}, {:?}", err, err);
                         }
                     }
+                },
+                None => {
                 }
             }
 
@@ -195,18 +213,19 @@ impl Server {
         }
     }
 
-    fn process_atom_feed(&mut self, feed_url: &str, feed: atom_syndication::Feed) -> Result<(), Error> {
-        trace!("Processing atom feed for {}", feed_url);
+    fn process_atom_feed(&mut self, feed: &Feed, atom_feed: atom_syndication::Feed) -> Result<(), Error> {
+        trace!("Processing atom feed for {}", feed.url);
 
         Ok(())
     }
 
-    fn process_rss_channel(&mut self, feed_url: &str, channel: rss::Channel)
+    fn process_rss_channel(&mut self, feed: &Feed, channel: rss::Channel)
         -> Result<(), Error> {
-        trace!("Processing RSS channel for feed {}", feed_url);
+        trace!("Processing RSS channel for feed {}", &feed.url);
 
         for item in channel.items {
             let guid = item.guid.map(|guid| guid.value);
+            let feed_url = feed.url.clone();
 
             if let Some(story) = Story::find_by_feed_url_and_guid(&self.database, &feed_url,
                                                                   &guid.as_ref().unwrap()) {
@@ -216,7 +235,7 @@ impl Server {
                 continue;
             } else {
                 Story::create(&self.database, item.title, guid, item.pub_date, item.description,
-                              feed_url.to_string()).unwrap();
+                              feed_url).unwrap();
                 // Insert the story into the database.
                 println!("New news story found!");
             }
