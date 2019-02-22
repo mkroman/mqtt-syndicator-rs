@@ -1,4 +1,4 @@
-// Copyright (c) 2016, Mikkel Kroman <mk@uplink.io>
+// Copyright (c) 2017, Mikkel Kroman <mk@uplink.io>
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -22,18 +22,20 @@
 // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use ::rusqlite;
+use rusqlite::{self, Connection};
+use rss;
+use chrono::{DateTime, FixedOffset, NaiveDateTime, UTC, TimeZone};
 
 use super::error;
 
-/// Story struct.
+/// Story struct that abstracts away the feed type.
 #[derive(Debug)]
 pub struct Story {
-    pub title: Option<String>,
-    pub guid: Option<String>,
-    pub description: Option<String>,
-    pub pub_date: Option<String>,
-    pub feed_url: String,
+    title: Option<String>,
+    guid: Option<String>,
+    description: Option<String>,
+    pub_date: Option<DateTime<FixedOffset>>,
+    feed_url: Option<String>,
 }
 
 impl Story {
@@ -41,18 +43,38 @@ impl Story {
     /// 
     /// Returns the `Story` object if it was successfully added to the database, an error
     /// otherwise.
-    pub fn create<DB>(database: DB, title: Option<String>, guid: Option<String>, 
-                      pub_date: Option<String>, description: Option<String>, feed_url: String)
-        -> Result<Story, error::DatabaseError>
-        where DB: AsRef<rusqlite::Connection> {
-        let story = Story {
-            title: title,
-            guid: guid,
-            pub_date: pub_date,
-            description: description,
-            feed_url: feed_url,
-        };
+    // pub fn create<DB>(database: DB, title: Option<String>, guid: Option<String>,
+    //                   pub_date: Option<String>, description: Option<String>, feed_url: String)
+    //     -> Result<Story, error::DatabaseError>
+    //     where DB: AsRef<rusqlite::Connection> {
+    //     let date =
+    //     let story = Story {
+    //         title: title,
+    //         guid: guid,
+    //         pub_date: pub_date,
+    //         description: description,
+    //         feed_url: feed_url,
+    //     };
+    //
+    //     let connection = database.as_ref();
+    //
+    //     match connection.execute(
+    //         "INSERT INTO stories (title, guid, pub_date, description, feed_url)
+    //          VALUES (?, ?, ?, ?, ?)",
+    //         &[&story.title, &story.guid, &story.pub_date, &story.description,
+    //             &story.feed_url]) {
+    //         Ok(_) => return Ok(story),
+    //         Err(err) => return Err(err.into()),
+    //     }
+    // }
 
+    /// Creates a new Story and inserts it into the `database`.
+    ///
+    /// Returns the `Story` object if it was successfully added to the database, an error
+    /// otherwise.
+    /// Finds a single story with the given `feed_url` and `guid`.
+    pub fn insert<DB>(database: DB, story: Story) -> Result<Story, error::DatabaseError>
+        where DB: AsRef<Connection> {
         let connection = database.as_ref();
 
         match connection.execute(
@@ -65,7 +87,6 @@ impl Story {
         }
     }
 
-    /// Finds a single story with the given `feed_url` and `guid`.
     pub fn find_by_feed_url_and_guid<DB, S1, S2>(database: DB, feed_url: S1, guid: S2)
         -> Option<Story>
         where DB: AsRef<rusqlite::Connection>, S1: AsRef<str>, S2: AsRef<str> {
@@ -89,6 +110,28 @@ impl Story {
             Ok(result) => return Some(result),
             Err(rusqlite::Error::QueryReturnedNoRows) => return None,
             Err(_) => return None,
+        }
+    }
+}
+
+
+impl From<rss::Item> for Story {
+    fn from(item: rss::Item) -> Story {
+        let date = item.pub_date.and_then(|date| {
+            DateTime::parse_from_str(&date, "%a, %d %b %Y %T %Z").ok()
+                .or(DateTime::parse_from_rfc2822(&date).ok())
+                .or_else(|| {
+                    error!("Failed to parse {:?} as a rfc822 datetime!", &date);
+
+                    None
+                })
+        });
+
+        Story {
+            title: item.title,
+            guid: item.guid.map(|guid| guid.value),
+            pub_date: date,
+            description: item.description,
         }
     }
 }

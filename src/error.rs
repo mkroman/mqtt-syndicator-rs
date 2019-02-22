@@ -24,6 +24,7 @@
 
 use std::io;
 
+use rss;
 use rusqlite;
 
 pub use super::config::Error as ConfigError;
@@ -49,6 +50,10 @@ quick_error! {
             description("config error")
         }
 
+        Rss(err: rss::Error) {
+            from()
+            description("rss parsing error")
+        }
     }
 }
 
